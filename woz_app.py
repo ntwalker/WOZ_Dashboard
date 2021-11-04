@@ -2,9 +2,11 @@ import dash
 import dash_core_components as dcc
 import dash_html_components as html
 import dash_cytoscape as cyto
+import dash_table as dt
 from dash.dependencies import Input, Output, State
 import plotly.express as px
 import pandas as pd
+import numpy as np
 import json
 import collections
 import zmq
@@ -49,25 +51,46 @@ external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
 app = dash.Dash(__name__, external_stylesheets=external_stylesheets, suppress_callback_exceptions=True)
 
 app.layout = html.Div([
-            html.H3('Graphdial Dashboard V1', style={'text-align': 'center'}),
-            html.Div([
-                #html.Div([
-                    #dcc.Input(id="text-input", type="text", n_submit=1, placeholder="Say something...")]
-                    #html.Button(id='listen-pause', n_clicks=0, children='Submit', style={'text-align': 'center'})]
-                    #),
-                #html.Br(),
-                html.Div(id='placeholder-utterance', style={'width': '4%', 'display': 'inline-block'})],
-                id='screen',
-                style={'width': '400px', 'margin': '0 auto'}),
+            html.H3('GraphDial Dashboard', style={'text-align': 'center', 'color': 'white', 'background': 'green'}),
+            html.Div("Last User Utterance:", id='utterance-label', style={'text-align': 'center', 'width': '25%', 'fontSize': 15,'background': 'tan'}),
+            html.Div("Utterance", id='user-utterance', style={'text-align': 'center', 'width': '25%', 'fontSize': 20,'background': 'tan'}),
+            #html.Div([
+            #    html.Div(id='placeholder-utterance', style={'width': '4%', 'display': 'inline-block'})],
+            #    id='screen',
+            #    style={'width': '400px', 'margin': '0 auto'}),
             
             #html.Div(id='input-utterance', style={'width': '10%', 'display': 'inline-block'}),
-            html.Div("Utterance", id='user-utterance', style={'width': '10%', 'text-align': 'center', 'display': 'inline-block', 'fontSize': 30}),
             dcc.Interval(
                 id='interval-component',
                 interval=1*1000, # in milliseconds
                 n_intervals=0
             ),
+            html.Div(style={'width': '5%', 'display': 'inline-block'}), 
             # placeholder
+            html.Div("Bot Response", id="update", style={'text-align': 'center', 'fontSize': 30}),
+            html.Div("", id="response-holder", style={'text-align': 'center', 'fontSize': 30}),
+            html.Div("", id="line-holder", style={'width': '20%', 'hidden': 'hidden', 'fontSize': 30}),
+            html.Div(
+                [dcc.Dropdown(
+                    id = 'agent-response',
+                    placeholder = "Select Template...",
+                    options = [{'label': i, 'value': i} for i in ["Hello!", "Sorry, I didn't understand that.", "_Person_ is available!"]]
+                )],
+                style={'width': '20%', 'align-items': 'center', 'justify-content': 'center', 'padding-left': '40%'}),
+            html.Div(
+                [html.Button(
+                    id='send-button', 
+                    n_clicks=0, 
+                    children='Send', 
+                    style={'align': 'center', 'display': 'flex',  'justify': 'center'}
+                )],
+                style={'align-items': 'center', 'justify-content': 'center', 'padding-left': '40%'}),
+            # placeholder
+            html.Div("Person Here", id="selected-person", style={'text-align': 'center', 'fontSize': 15, 'display': 'inline-block'}),
+            html.Div(style={'width': '5%', 'display': 'inline-block'}), 
+            html.Div("Group Here", id="selected-group", style={'text-align': 'center', 'fontSize': 15, 'display': 'inline-block'}),
+            html.Div(style={'width': '5%', 'display': 'inline-block'}), 
+            html.Div("Room Here", id="selected-room", style={'text-align': 'center', 'fontSize': 15, 'display': 'inline-block'}),
             html.Div(style={'width': '10%', 'display': 'inline-block'}),
             html.H5("People", style={'width': '5%'}),
             dcc.Dropdown(
@@ -80,35 +103,23 @@ app.layout = html.Div([
             dcc.Dropdown(
                 id='groups-dropdown',
                 options=groups,
-                style={'width': '50%', 'display': 'inline-block'}
+                style={'width': '50%'}
             ),
             html.Div(id='groups-output-container'),
             html.H5("Rooms", style={'width': '5%'}),
             dcc.Dropdown(
                 id='rooms-dropdown',
                 options=rooms,
-                style={'width': '50%', 'display': 'inline-block'}
+                style={'width': '50%'}
             ),
             html.Div(id='rooms-output-container'),
-            # placeholder
-            html.Div(style={'width': '5%', 'display': 'inline-block'}),
-            html.Div("Bot Response", id="update", style={'width': '20%', 'display': 'inline-block', 'fontSize': 30}),
-            html.Div(style={'width': '5%', 'display': 'inline-block'}), 
-            html.Div(
-                dcc.Dropdown(
-                    id = 'agent-response',
-                    options = [{'label': i, 'value': i} for i in ["Hello!", "Sorry, I didn't understand that."]], 
-            ), style={'width': '20%', 'display': 'inline-block'}),
-            html.Button(id='send-button', n_clicks=0, children='Send', style={'text-align': 'center'}),
             # placeholder
             html.Div(style={'width': '5%', 'display': 'inline-block'}),
             dcc.Interval(
                 id='socket-interval',
                 interval=1*1000000, # in milliseconds
-                n_intervals=0
-            ),
-            html.Div("NONE", id="response-holder", style={'width': '20%', 'display': 'hidden', 'fontSize': 30}),
-            html.Div("", id="line-holder", style={'width': '20%', 'display': 'hidden', 'fontSize': 30})
+                n_intervals=0 #MUST BE 0
+            )
         ])
 
 @app.callback(
@@ -121,8 +132,18 @@ def update_people_calendar(value):
     if len(jp[value]) == 0:
         return html.P("No Events to Display")
     else:
-        return [html.P(str(item)) for item in jp[value]]
-
+        #return [html.P(str(item)) for item in jp[value]]
+        df = pd.DataFrame(jp[value])
+        df["attendees"] = df["attendees"].apply(lambda x: ", ".join(x))
+        return dt.DataTable(
+                id='person-tbl', data=df.to_dict('records'),
+                columns=[{"name": i, "id": i} for i in df.columns],
+                style_cell={'textAlign': 'left'},
+                sort_action="native",
+                sort_mode="single",
+                column_selectable="single",
+                row_selectable="multi",
+                )
 @app.callback(
     Output('groups-output-container', 'children'),
     Input('groups-dropdown', 'value')
@@ -133,19 +154,74 @@ def update_groups_calendar(value):
     if len(jg[value]) == 0:
         return html.P("No Events to Display")
     else:
-        return [html.P(str(item)) for item in jg[value]]
+        #return [html.P(str(item)) for item in jg[value]]
+        df = pd.DataFrame(jg[value])
+        df["attendees"] = df["attendees"].apply(lambda x: ", ".join(x))
+        return dt.DataTable(
+                id='group-tbl', data=df.to_dict('records'),
+                columns=[{"name": i, "id": i} for i in df.columns],
+                style_cell={'textAlign': 'left'},
+                sort_action="native",
+                sort_mode="single",
+                column_selectable="single",
+                row_selectable="multi",
+                )
 
 @app.callback(
     Output('rooms-output-container', 'children'),
     Input('rooms-dropdown', 'value')
 )
-def update_events_calendar(value):
+def update_rooms_calendar(value):
     if value == None:
         return html.P("No Events to Display")
     if len(jr[value]) == 0:
         return html.P("No Events to Display")
     else:
-        return [html.P(str(item)) for item in jr[value]]
+        #return [html.P(str(item)) for item in jr[value]]
+        df = pd.DataFrame(jr[value])
+        df["attendees"] = df["attendees"].apply(lambda x: ", ".join(x))
+        return dt.DataTable(
+                id='room-tbl', data=df.to_dict('records'),
+                columns=[{"name": i, "id": i} for i in df.columns],
+                style_cell={'textAlign': 'left'},
+                sort_action="native",
+                sort_mode="single",
+                column_selectable="single",
+                row_selectable="multi",
+                )
+
+@app.callback(
+    Output('selected-person', 'children'),
+    Input('person-tbl', 'active_cell'),
+    State('person-tbl', 'data')
+)
+def fill_person(selected_entity, data):
+    try:
+        return data[selected_entity['row']][selected_entity['column_id']]
+    except:
+        return ""
+
+@app.callback(
+    Output('selected-group', 'children'),
+    Input('group-tbl', 'active_cell'),
+    State('group-tbl', 'data')
+)
+def fill_group(selected_entity, data):
+    try:
+        return data[selected_entity['row']][selected_entity['column_id']]
+    except:
+        return ""
+
+@app.callback(
+    Output('selected-room', 'children'),
+    Input('room-tbl', 'active_cell'),
+    State('room-tbl', 'data')
+)
+def fill_room(selected_entity, data):
+    try:
+        return data[selected_entity['row']][selected_entity['column_id']]
+    except:
+        return ""
 
 @app.callback(
     Output(component_id='user-utterance', component_property='children'),
