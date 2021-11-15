@@ -236,7 +236,7 @@ app.layout = html.Div([
               [Input('change', 'n_clicks')],
               [State('access', 'value')])
 def display_page(n_clicks, password):
-    if password != "wizard":
+    if password == "wizard":
         return [html.Div(wizard_page, id='wizard'), html.Div(user_page, id='user', hidden='hidden'), ""]
     else:
         return [html.Div(wizard_page, id='wizard', hidden='hidden'), html.Div(user_page, id='user'), ""]
