@@ -1,5 +1,5 @@
 import dash_devices
-from dash_devices.dependencies import Input, Output, State
+from dash_devices.dependencies import Input, Output, State, ClientsideFunction
 import dash_html_components as html
 import dash_core_components as dcc
 import dash_cytoscape as cyto
@@ -20,6 +20,16 @@ import time
 from time import strftime
 from datetime import date
 from faker import Faker
+import quart
+from quart import websocket
+import numpy as np
+import soundfile as sf
+
+server = quart.Quart(__name__)
+
+r = sr.Recognizer()
+
+transcription = ""
 
 # Functions to filter the datatable
 def to_string(filter):
@@ -98,9 +108,43 @@ def text_to_speech(text):
     engine.say(text)
     engine.runAndWait()
 
-fake = Faker()
+@server.websocket("/ws")
+async def ws():
+    global transcription
+    while True:
+        data = await websocket.receive()
 
-app = dash_devices.Dash(__name__)
+        f = open('./recording.wav', 'wb')
+        f.write(data) 
+        f.close()
+
+        r = sr.Recognizer()
+
+        try:
+            with sr.AudioFile("recording.wav") as source:
+                audio = r.record(source)
+                transcription = r.recognize_google(audio)
+        except sr.UnknownValueError:
+            transcription = "Could not parse input"
+
+        print("Transcription: %s", transcription)
+
+        #await websocket.send(f"echo {data[0:10]}")
+
+app = dash_devices.Dash(__name__, server=server)
+
+# app.layout = html.Div(
+#     [html.Div("Hello", id="starter"),
+#     html.Div(transcription, id="store"),
+#     html.Div("", id="dummy"),
+#     de.WebSocket(id="ws"),
+#     dcc.Interval(
+#             id='interval',
+#             interval=1*1000, # in milliseconds
+#             n_intervals=0
+#         ),
+#     html.Button("Push", id="listen-pause")])
+
 #app = dash_devices.Dash()
 app.config.suppress_callback_exceptions = True
 
@@ -222,14 +266,38 @@ user_page = html.Div([
 app.layout = html.Div([
     dcc.Location(id='url', refresh=False),
     dcc.Input(id="access", type="text", value=''),
+    dcc.Interval(
+        id='interval',
+        interval=1*1000, # in milliseconds
+        n_intervals=0
+    ),
     html.Button(id='change', n_clicks=0, children='admin', style={'text-align': 'center'}),
     html.Div(user_page, id='user-content'),
     html.Div(wizard_page, id='wizard-content'),
-    #html.Div("", id='last-response', hidden='hidden'),
+    html.Div("", id='dummy', hidden='hidden'),
     html.Div("Misc", id='miscellaneous', hidden='hidden'),
 ])
 
-# Page navigation callbacks
+
+app.clientside_callback(
+    ClientsideFunction(
+        namespace='clientside',
+        function_name='websocket_test'
+    ),
+    Output('dummy', 'children'),
+    [Input('listen-pause', 'n_clicks')],
+)
+
+# @app.callback(Output("store", "children"), [Input("ws", "message")])
+# def message(e):
+#     print(e)
+#     if e == None:
+#         print("No Response Yet")
+#         return "None"
+#     else:
+#         print(e)
+#     return f"Response from websocket: {e['data']}"
+
 @app.callback([Output('wizard-content', 'children'),
                 Output('user-content', 'children'),
                 Output('access', 'value')],
@@ -240,6 +308,7 @@ def display_page(n_clicks, password):
         return [html.Div(wizard_page, id='wizard'), html.Div(user_page, id='user', hidden='hidden'), ""]
     else:
         return [html.Div(wizard_page, id='wizard', hidden='hidden'), html.Div(user_page, id='user'), ""]
+    return [html.Div(wizard_page, id='wizard', hidden='hidden'), html.Div(user_page, id='user'), ""]
 
 ###WIZARD PAGE CALLBACKS###
 
@@ -268,6 +337,8 @@ def filter_table(derived_query_structure):
 )
 def update_template(selected_template, selected_cell, _, __, data, current_template, prev_response):
     ctx = dash_devices.callback_context
+
+    print(selected_cell)
 
     try:
         if ctx.triggered[0]['prop_id'] == "wizard-response-template.value":
@@ -325,35 +396,23 @@ def say_agent_response(value):
 
 ##User Related Callbacks##
 
+@app.callback_shared(
+    Output('user-utterance', 'children'), 
+    [Input('interval', 'n_intervals')])
+def show_transcription(value):
+    return transcription
+
 @app.callback(
     Output(component_id='listen-pause', component_property='style'),
-    [Input(component_id='listen-pause', component_property='n_clicks')],
+    [Input(component_id='listen-pause', component_property='n_clicks'),
+    Input(component_id='dummy', component_property='children')],
 )
-def toggle_button(n_clicks):
-    return white_button_style
-
-@app.callback(
-    [Output(component_id='transcription', component_property='children'),
-    Output(component_id='listen-pause', component_property='children')],
-    [Input(component_id='listen-pause', component_property='style')],
-    [State(component_id='listen-pause', component_property='n_clicks')]
-)
-def transcribe_speech(_, n_clicks):
-    if n_clicks == 0:
-        return ["", "Record Message"]
-    print("Recording Speech...")
-    try:
-        with sr.Microphone() as source:
-            audio_text = r.listen(source, 10, 3)
-            transcript = r.recognize_google(audio_text)
-            return [r.recognize_google(audio_text), "Record Message"]
-    except sr.UnknownValueError:
-        return ["Could not parse input", "Record Message"]
-
-@app.callback_shared(Output('user-utterance', 'children'), 
-    [Input('transcription', 'children')])
-def display_transcription(value):
-    return value
+def toggle_button(n_clicks, _):
+    ctx = dash_devices.callback_context
+    if ctx.triggered[0]['prop_id'] == "dummy.children":
+        return red_button_style
+    else:
+        return white_button_style
 
 ##Data Saving Function(s)##
 
@@ -363,7 +422,5 @@ def save_interaction(_):
     #Save functions here to output data
     return _
 
-
 if __name__ == '__main__':
-    app.run_server(debug=True, port=5000, suppress_callback_exceptions=True)
-    #app.run_server(debug=False, host='0.0.0.0', port=8050, suppress_callback_exceptions=True)
+    app.run_server(debug=True, port=8050, suppress_callback_exceptions=True)
