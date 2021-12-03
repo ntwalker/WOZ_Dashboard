@@ -23,7 +23,6 @@ from faker import Faker
 import quart
 from quart import websocket
 import numpy as np
-import soundfile as sf
 
 server = quart.Quart(__name__)
 
@@ -282,7 +281,7 @@ app.layout = html.Div([
 app.clientside_callback(
     ClientsideFunction(
         namespace='clientside',
-        function_name='websocket_test'
+        function_name='record_audio'
     ),
     Output('dummy', 'children'),
     [Input('listen-pause', 'n_clicks')],
