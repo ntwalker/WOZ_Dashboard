@@ -107,6 +107,10 @@ def text_to_speech(text):
     engine.say(text)
     engine.runAndWait()
 
+@app.cli.command('run')
+def run():
+    app.run(port=8050, certfile='cert.pem', keyfile='key.pem')
+
 @server.websocket("/ws")
 async def ws():
     global transcription
@@ -281,7 +285,7 @@ app.layout = html.Div([
 app.clientside_callback(
     ClientsideFunction(
         namespace='clientside',
-        function_name='record_audio'
+        function_name='websocket_test'
     ),
     Output('dummy', 'children'),
     [Input('listen-pause', 'n_clicks')],
@@ -422,4 +426,4 @@ def save_interaction(_):
     return _
 
 if __name__ == '__main__':
-    app.run_server(debug=True, port=8050, suppress_callback_exceptions=True)
+    app.run_server(debug=True, certfile='cert.pem', keyfile='key.pem', host='0.0.0.0', port=8050, suppress_callback_exceptions=True)
